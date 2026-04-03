@@ -1,0 +1,278 @@
+local MacLib = loadstring(game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt"))()
+local playerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+local purchaseFrame = playerGui.Main.Full:FindFirstChild("Purchase")
+
+if purchaseFrame then
+    pcall(function()
+        purchaseFrame:Destroy()
+    end)
+end
+
+local Player = game:GetService("Players").LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+
+-- 0. ประกาศตัวแปร Global ไว้ก่อนเพื่อกัน Error ใน Loop
+_G.SelectedRarity = {}
+_G.SelectedHeroes = {}
+_G.Collecting = false
+_G.Selling = false
+
+-- 1. เตรียมข้อมูลจาก Assets
+local Heroes = {}
+local Rarity = {}
+local assetsFolder = ReplicatedStorage:WaitForChild("Assets")
+local Gradients = assetsFolder:WaitForChild("Gradients")
+local rarityGroup = Gradients:WaitForChild("Rarity")
+local heroesFolder = assetsFolder:WaitForChild("Heroes")
+
+-- รอให้ Object โหลดเข้ามาก่อน (ป้องกัน Dropdown ว่าง)
+repeat task.wait(0.5) until #rarityGroup:GetChildren() > 0 and #heroesFolder:GetChildren() > 0
+
+-- ดึงรายชื่อ Rarity (ตรวจสอบ ClassName ให้ตรงกับในเกมของคุณ)
+for _, rarity in pairs(rarityGroup:GetChildren()) do
+    if rarity:IsA("UIGradient") or rarity:IsA("UiGradient") then
+        table.insert(Rarity, rarity.Name)
+    end
+end
+
+-- ดึงรายชื่อ Heroes
+for _, hero in pairs(heroesFolder:GetChildren()) do
+    if hero:IsA("Model") then
+        table.insert(Heroes, hero.Name)
+    end
+end
+
+local NotificationsOn = true 
+
+-- 2. สร้างหน้าต่าง UI
+local Window = MacLib:Window({
+    Title = "Vaguard Hub",
+    Subtitle = "v1.0.0 - Premium Edition",
+    Size = UDim2.fromOffset(700, 500),
+    DragStyle = 2,
+    ShowUserInfo = true,
+    Keybind = Enum.KeyCode.LeftAlt,
+    AcrylicBlur = true,
+})
+
+local function SmartNotify(config)
+    if NotificationsOn then
+        Window:Notify(config)
+    end
+end
+
+-- Global Settings
+local globalSettings = {
+    UIBlurToggle = Window:GlobalSetting({
+        Name = "UI Blur",
+        Default = Window:GetAcrylicBlurState(),
+        Callback = function(bool) Window:SetAcrylicBlurState(bool) end,
+    }),
+    NotificationToggler = Window:GlobalSetting({
+        Name = "Notifications",
+        Default = true,
+        Callback = function(bool)
+            NotificationsOn = bool
+            Window:Notify({ Title = "System", Description = (bool and "Enabled" or "Disabled") .. " Notifications", Lifetime = 3 })
+        end,
+    }),
+    ShowUserInfo = Window:GlobalSetting({
+        Name = "Show User Info",
+        Default = Window:GetUserInfoState(),
+        Callback = function(bool)
+            Window:SetUserInfoState(bool)
+            SmartNotify({
+                Title = "System",
+                Description = (bool and "Showing" or "Redacted") .. " User Info",
+                Lifetime = 3
+            })
+        end,
+    })
+}
+
+-- 3. Tabs & Sections
+local tabGroups = { TabGroup1 = Window:TabGroup() }
+local tabs = {
+    Main = tabGroups.TabGroup1:Tab({ Name = "Home", Image = "rbxassetid://18821914323" }),
+    Settings = tabGroups.TabGroup1:Tab({ Name = "Settings", Image = "rbxassetid://10734950309" })
+}
+
+local sections = {
+    MainSection1 = tabs.Main:Section({ Side = "Left" }),
+    SellSection = tabs.Main:Section({ Side = "Right" }),
+    AutoPurchaseSection = tabs.Main:Section({ Name = "Auto Purchase", Side = "Left" }),
+}
+
+-- [ ฝั่งซ้าย: Features ] --
+sections.MainSection1:Header({ Name = "Main Features" })
+
+sections.MainSection1:Toggle({
+    Name = "Auto Collect Income",
+    Default = false,
+    Callback = function(value)
+        _G.Collecting = value
+        SmartNotify({ Title = "Collect", Description = (value and "Started" or "Stopped") .. " Auto Collect", Lifetime = 3 })
+    end,
+}, "CollectToggle")
+
+sections.MainSection1:Button({
+    Name = "Equip Best Brainrots",
+    Callback = function()
+        Remotes:WaitForChild("EquipBestBrainrots"):InvokeServer()
+        SmartNotify({ Title = "Success", Description = "Equipped Best Items", Lifetime = 2 })
+    end,
+})
+
+sections.MainSection1:Button({
+    Name = "Equip Best Heroes",
+    Callback = function()
+        Remotes:WaitForChild("EquipBestHeroes"):InvokeServer()
+        SmartNotify({ Title = "Success", Description = "Equipped Best Items", Lifetime = 2 })
+    end,
+})
+
+-- [ ฝั่งขวา: Selling ] --
+sections.SellSection:Header({ Name = "Hybrid Selling System" })
+
+sections.SellSection:Label({
+  Text = "Brainrot"
+})
+
+sections.SellSection:Dropdown({
+    Name = "Sell Rarity",
+    Search = true,
+    Multi = true,
+    Options = Rarity,
+    Default = {},
+    Callback = function(Value)
+        _G.SelectedRarity = Value
+    end,
+}, "RarityDropdown")
+
+sections.SellSection:Toggle({
+    Name = "Auto Sell Items",
+    Default = false,
+    Callback = function(value)
+        _G.Selling = value
+        -- เมื่อเปิด ให้ส่งลิสต์ปัจจุบันไปกระตุ้นระบบเกม
+        if value and _G.SelectedRarity then
+            pcall(function()
+                Remotes:WaitForChild("SellBulk"):FireServer({_G.SelectedRarity})
+            end)
+        end
+        SmartNotify({ Title = "Sell Status", Description = (value and "Enabled" or "Disabled") .. " Auto Sell", Lifetime = 3 })
+    end,
+}, "SellToggle")
+
+
+sections.AutoPurchaseSection:Header({ Name = "Purchase Features" })
+
+
+sections.AutoPurchaseSection:Dropdown({
+    Name = "Select Rarity Heroes to Purchase",
+    Search = true,
+    Multi = true,
+    Options = Rarity,
+    Default = {},
+    Callback = function(Value)
+        _G.SelectedRarity2 = Value
+    end,
+}, "RarityDropdown2")
+
+sections.AutoPurchaseSection:Toggle({
+    Name = "Auto Purchase Heroes",
+    Default = false,
+    Callback = function(value)
+        _G.Purchasing = value
+
+        SmartNotify({ Title = "Purchase Status", Description = (value and "Enabled" or "Disabled") .. " Auto Purchase", Lifetime = 3 })
+    end,
+}, "PurchaseToggle")
+
+
+
+--- 4. ระบบลูปการทำงาน (Back-end) ---
+
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        
+        if _G.Purchasing and _G.SelectedRarity2 and next(_G.SelectedRarity2) ~= nil then
+
+            for _, hero in pairs(workspace.HeroCenter:GetChildren()) do
+                if not _G.Purchasing then break end
+
+                local root = hero:FindFirstChild("HumanoidRootPart")
+                if root then
+                    local billboard = root:FindFirstChild("HeroBillboardCircle")
+                    local prompt = root:FindFirstChild("HeroPurchasePrompt")
+
+                    -- เช็ค Enabled ให้ชัดเจน
+                    if billboard and prompt and prompt:IsA("ProximityPrompt") then
+                        
+                        -- ดึง Rarity
+                        local rarityLabel = billboard:FindFirstChild("HeroRarity")
+                        local isTargetRarity = rarityLabel and _G.SelectedRarity2[rarityLabel.Text]
+
+                        -- เช็ค Enabled อีกรอบก่อนกด (Double Check)
+                        if isTargetRarity and prompt.Enabled == true then
+                            pcall(function()
+                                if prompt.Enabled then 
+                                    Player.Character.HumanoidRootPart.CFrame = CFrame.new(0, 3, 0)
+                                    wait(2)
+                                    fireproximityprompt(prompt)
+                                end
+                            end)
+                            task.wait(0.2) -- เพิ่มหน่วงเวลานิดนึงเพื่อให้ Server ทัน Update สถานะ
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+
+task.spawn(function()    
+    while true do
+        task.wait(2)
+        if _G.Selling and _G.SelectedRarity and next(_G.SelectedRarity) ~= nil then
+            local hasSelection = false
+            for _, enabled in pairs(_G.SelectedRarity) do
+                if enabled then hasSelection = true break end
+            end
+
+            if hasSelection then
+                pcall(function()
+                    Remotes:WaitForChild("SellBulk"):InvokeServer("Brainrot", _G.SelectedRarity)
+                end)
+            end
+        end
+    end
+end)
+
+-- ลูป Auto Collect (เก็บเงิน 1-11)
+task.spawn(function()
+    local collectRemote = Remotes:WaitForChild("CollectBrainrotIncome")
+    while true do
+        if _G.Collecting then
+            for i = 1, 20 do
+                if not _G.Collecting then break end
+                task.spawn(function()
+                    collectRemote:InvokeServer(tostring(i))
+                end)
+                task.wait(0.05)
+            end
+            task.wait(0.5)
+        else
+            task.wait(1)
+        end
+    end
+end)
+
+-- 5. จบการตั้งค่า
+MacLib:SetFolder("Maclib_UserConfigs")
+tabs.Settings:InsertConfigSection("Left")
+tabs.Main:Select()
+MacLib:LoadAutoLoadConfig()
